@@ -1,46 +1,52 @@
-#!/usr/bin/env python
-# Copyright (c) Facebook, Inc. and its affiliates.
-# All rights reserved.
-
-# This source code is licensed under the license found in the
-# LICENSE file in the root directory of this source tree.
-
 #from model_checker import *
 
 import math
 from collections import Counter
 
-from torchtext.data.utils import get_tokenizer
-from torchtext.vocab import vocab
-
 import torch.nn as nn
 import torch.utils.data
-import torch.utils.data.distributed
+from torchtext.data.utils import get_tokenizer
+from torchtext.vocab import vocab
+import torch.backends.cudnn as cudnn
 
-import simsiam.NLPSS_Builder
 import simsiam.En_Es_Dataset
+import simsiam.NLPSS_Builder
 
+###############
+# User Inputs #
+###############
+
+# Dataset from http://storage.googleapis.com/download.tensorflow.org/data/spa-eng.zip
 dataPath = 'D:\SpaEngTranslation\spa.txt' # Path to dataset
-arch = 'rnn' # Encoder architecture
-seed = None
-nWorkers = 8
+encArch = 'rnn' # Encoder architecture
+seed = None # Seed number for RNG
 nEpochs = 20
 startEpoch = 0
-batchSize = 64
+batchSize = 128
 initLR = 0.05 # Initial LR before decay
 momentum = 0.9
 weightDecay = 0.0001
-printFreq = 1859 # Number of batches before printing stats
-checkpointPath = None # Path to resume from checkpoint
-gpuID = 0 # GPU to use
+printFreq = 1000 # Number of batches before printing stats - useless atm
+checkpointPath = None # Path to resume from checkpoint - useless atm
+fixPredLR = True # Fix the learning rate (no decay) of the predictor network
 
-seqLen = 32
-embDim = 128
-hidDim = 256
-projDim = 256
-predDim = 128
-fixPredLR = False
+seqLen = 64 # Permissible sentence length
+vocDim = 30000 # Vocabulary size
+embDim = 128 # Word embedding dimension
+hidDim = 256 # RNN hidden dimension
+projDim = 256 # Projector output dimension
+predDim = 128 # Predictor internal dimension
 
+device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+if seed is not None:
+    torch.seed(seed)
+    cudnn.deterministic = True
+
+#########################
+# Preprocess Input Data #
+#########################
+
+# From the text file, gather the corresponding lists of English/Spanish sentences
 def get_string_lists(filePath):
     with open(filePath, 'r', encoding='utf-8') as f:
         allLines = f.readlines()
@@ -54,46 +60,67 @@ def get_string_lists(filePath):
 
     return enList, esList
 
+# Get the string lists and then make one large list of both English and Spanish
 enList, esList = get_string_lists(dataPath)
 allList = enList.copy()
 allList.extend(esList)
 
+# Create the sentence tokenizer (I just used the English one, it works well enough for tokenizing spanish too)
 enTokenizer = get_tokenizer('spacy', language='en_core_web_sm')
 #esTokenizer = get_tokenizer('spacy', language='es_core_news_sm')
 
+# Count the number of unique tokens in the corpus, keep the most popular ones, then create a token dict
+# Also add the <unk> and <pad> tokens to the dictonary
 def build_vocab(stringList, tokenizer, maxSize):
     counter = Counter()
     for stringVal in stringList:
         counter.update(tokenizer(stringVal))
     return vocab(dict(counter.most_common(maxSize)), specials=['<unk>', '<pad>'])
 
+# Get the token dictionary and set the default token as the <unk> token
 #enVocab = build_vocab(enList, enTokenizer, maxSize=10000)
 #esVocab = build_vocab(esList, esTokenizer, maxSize=10000)
-allVocab = build_vocab(allList, enTokenizer, maxSize=20000)
+allVocab = build_vocab(allList, enTokenizer, maxSize=vocDim)
 allVocab.set_default_index(allVocab['<unk>'])
 
-device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
-
+# Torch dataset/dataloader to gather samples, preprocess them, and load them as batches
+# I think this can be improved with native torchtext functions - I set it up like a custom image dataset to make batches
 trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, enTokenizer, allVocab, seqLen, transform=None)
 trainLoader = torch.utils.data.DataLoader(trainDataset, batch_size=batchSize, shuffle=True, drop_last=False)
 
-model = simsiam.NLPSS_Builder.NLPSimSiam(len(allVocab), embDim=embDim, hidDim=hidDim, projDim=projDim, predDim=predDim)
+###############
+# Build Model #
+###############
+
+# Build the NLP_SimSiam model
+model = simsiam.NLPSS_Builder.NLPSimSiam(encArch=encArch, vocDim=len(allVocab), embDim=embDim,
+                                         hidDim=hidDim, projDim=projDim, predDim=predDim)
 model = model.to(device)
 
+# Same as SimSiam
 criterion = nn.CosineSimilarity(dim=1)
 criterion = criterion.to(device)
 
+# Adjust the intial learning rate based on batch size
 initLR = initLR * batchSize / 256
 
+# Fix the learning rate of the predictor
 if fixPredLR:
-    optimParams = [{'params': model.module.encoder.parameters(), 'fix_lr': False},
-                   {'params': model.module.predictor.parameters(), 'fix_lr': True}]
+    optimParams = [{'params': model.embedder.parameters(), 'fix_lr': False},
+                   {'params': model.encoder.parameters(), 'fix_lr': False},
+                   {'params': model.projector.parameters(), 'fix_lr': False},
+                   {'params': model.predictor.parameters(), 'fix_lr': True}]
 else:
     optimParams = model.parameters()
 
+# Set the model optimizer
 optimizer = torch.optim.SGD(optimParams, initLR, momentum=momentum, weight_decay=weightDecay)
 
+###############
+# Train Model #
+###############
 
+# Function to carry out 1 epoch of training
 def train(trainLoader, model, criterion, optimizer, epoch):
 
     model.train()
@@ -101,26 +128,27 @@ def train(trainLoader, model, criterion, optimizer, epoch):
 
     for ii, phrases in enumerate(trainLoader):
 
+        # Get batched inputs in correct format
         phrases[0] = phrases[0].transpose(1, 0).to(device)
         phrases[1] = phrases[1].transpose(1, 0).to(device)
 
-        # compute output and loss
+        # Compute output and loss
         p1, p2, z1, z2 = model(x1=phrases[0], x2=phrases[1])
         loss = -(criterion(p1, z2).mean() + criterion(p2, z1).mean()) * 0.5
         lossAvg = (lossAvg * ii + loss.detach()) / (ii + 1)
 
-        # compute gradient and do SGD step
+        # Gradient and backprop
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
 
+        # Print status
         if ii == (len(trainLoader) - 1):
-            print('Epoch {} | Batch {} / {} | Loss: {} | AvgLoss: {}'
+            print('Epoch {:04d} | Batch {:04d} / {:04d} | 1 Batch Loss: {:6.3f} | Epoch Avg Loss: {:6.3f}'
                   .format(epoch, ii, len(trainLoader) - 1, loss.detach(), lossAvg))
 
-
+# Decay the learning rate based on schedule
 def adjust_learning_rate(optimizer, initLR, epoch):
-    """Decay the learning rate based on schedule"""
     cur_lr = initLR * 0.5 * (1. + math.cos(math.pi * epoch / nEpochs))
     for param_group in optimizer.param_groups:
         if 'fix_lr' in param_group and param_group['fix_lr']:
@@ -128,6 +156,18 @@ def adjust_learning_rate(optimizer, initLR, epoch):
         else:
             param_group['lr'] = cur_lr
 
+# Save the model data
+def save_checkpoint(state, fileName='checkpoint.pth.tar'):
+    torch.save(state, fileName)
+
+# Do the actual training
 for epoch in range(startEpoch, nEpochs):
     adjust_learning_rate(optimizer, initLR, epoch)
     train(trainLoader, model, criterion, optimizer, epoch)
+
+    if (epoch + 1) % 10 == 0:
+        save_checkpoint({'epoch': epoch + 1,
+                         'arch': encArch,
+                         'state_dict': model.state_dict(),
+                         'optimizer': optimizer.state_dict()},
+                        fileName='checkpoint{:04d}.pth.tar'.format(epoch))
