@@ -20,7 +20,7 @@ import simsiam.NLPSS_Builder
 dataPath = 'D:\SpaEngTranslation\spa.txt' # Path to dataset
 encArch = 'lstm' # Encoder architecture
 seed = None # Seed number for RNG
-nEpochs = 500
+nEpochs = 1000
 startEpoch = 0
 batchSize = 256
 initLR = 0.05 # Initial LR before decay
@@ -28,6 +28,8 @@ momentum = 0.9
 weightDecay = 0.0001
 checkpointPath = None # Path to resume from checkpoint - useless atm
 fixPredLR = True # Fix the learning rate (no decay) of the predictor network
+randAugment = True # Boolean to do random augmentation on sentences
+augRNGThresh = 0.05 # Percent chance of a specific random augmentation occurring
 
 seqLen = 20 # Permissible sentence length
 vocDim = 10000 # Vocabulary size
@@ -84,7 +86,7 @@ allVocab.set_default_index(allVocab['<unk>'])
 
 # Torch dataset/dataloader to gather samples, preprocess them, and load them as batches
 # I think this can be improved with native torchtext functions - I set it up like a custom image dataset to make batches
-trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, enTokenizer, allVocab, seqLen, transform=None)
+trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, enTokenizer, allVocab, seqLen, randAugment, augRNGThresh)
 trainLoader = torch.utils.data.DataLoader(trainDataset, batch_size=batchSize, shuffle=True, drop_last=False)
 
 ###############
@@ -164,7 +166,7 @@ for epoch in range(startEpoch, nEpochs):
     adjust_learning_rate(optimizer, initLR, epoch)
     train(trainLoader, model, criterion, optimizer, epoch)
 
-    if (epoch + 1) % 10 == 0:
+    if (epoch + 1) % 50 == 0:
         save_checkpoint({'epoch': epoch + 1,
                          'encArch': encArch,
                          'tokenizer': enTokenizer,
