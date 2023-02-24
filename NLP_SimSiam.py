@@ -18,24 +18,23 @@ import simsiam.NLPSS_Builder
 
 # Dataset from http://storage.googleapis.com/download.tensorflow.org/data/spa-eng.zip
 dataPath = 'D:\SpaEngTranslation\spa.txt' # Path to dataset
-encArch = 'rnn' # Encoder architecture
+encArch = 'lstm' # Encoder architecture
 seed = None # Seed number for RNG
-nEpochs = 20
+nEpochs = 500
 startEpoch = 0
-batchSize = 128
+batchSize = 256
 initLR = 0.05 # Initial LR before decay
 momentum = 0.9
 weightDecay = 0.0001
-printFreq = 1000 # Number of batches before printing stats - useless atm
 checkpointPath = None # Path to resume from checkpoint - useless atm
 fixPredLR = True # Fix the learning rate (no decay) of the predictor network
 
-seqLen = 64 # Permissible sentence length
-vocDim = 30000 # Vocabulary size
-embDim = 128 # Word embedding dimension
-hidDim = 256 # RNN hidden dimension
-projDim = 256 # Projector output dimension
-predDim = 128 # Predictor internal dimension
+seqLen = 20 # Permissible sentence length
+vocDim = 10000 # Vocabulary size
+embDim = 256 # Word embedding dimension
+hidDim = 512 # RNN hidden dimension
+projDim = 512 # Projector output dimension
+predDim = 256 # Predictor internal dimension
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if seed is not None:
@@ -128,7 +127,7 @@ def train(trainLoader, model, criterion, optimizer, epoch):
 
     for ii, phrases in enumerate(trainLoader):
 
-        # Get batched inputs in correct format
+        # Get batched inputs in correct format (seqLen, batch size)
         phrases[0] = phrases[0].transpose(1, 0).to(device)
         phrases[1] = phrases[1].transpose(1, 0).to(device)
 
@@ -167,7 +166,9 @@ for epoch in range(startEpoch, nEpochs):
 
     if (epoch + 1) % 10 == 0:
         save_checkpoint({'epoch': epoch + 1,
-                         'arch': encArch,
+                         'encArch': encArch,
+                         'tokenizer': enTokenizer,
+                         'vocabulary': allVocab,
                          'state_dict': model.state_dict(),
                          'optimizer': optimizer.state_dict()},
-                        fileName='checkpoint{:04d}.pth.tar'.format(epoch))
+                        fileName='checkpoints\checkpoint{:04d}.pth.tar'.format(epoch))
