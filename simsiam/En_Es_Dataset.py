@@ -4,7 +4,7 @@ from torch.utils.data import Dataset
 import numpy as np
 
 class En_Es_Dataset(Dataset):
-    def __init__(self, enList, esList, tokenizer, vocabulary, seqLen, randAugment, augRNGThresh):
+    def __init__(self, enList, esList, tokenizer, vocabulary, seqLen, randAugment=False, augRNGThresh=0.1):
         self.enList = enList # List of english strings
         self.esList = esList # List of spanish strings
         self.tokenizer = tokenizer # Tokenizer object

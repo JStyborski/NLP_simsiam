@@ -20,7 +20,7 @@ import simsiam.NLPSS_Builder
 dataPath = 'D:\SpaEngTranslation\spa.txt' # Path to dataset
 encArch = 'lstm' # Encoder architecture
 seed = None # Seed number for RNG
-nEpochs = 1000
+nEpochs = 500
 startEpoch = 0
 batchSize = 256
 initLR = 0.05 # Initial LR before decay
@@ -29,7 +29,7 @@ weightDecay = 0.0001
 checkpointPath = None # Path to resume from checkpoint - useless atm
 fixPredLR = True # Fix the learning rate (no decay) of the predictor network
 randAugment = True # Boolean to do random augmentation on sentences
-augRNGThresh = 0.05 # Percent chance of a specific random augmentation occurring
+augRNGThresh = 0.1 # Percent chance of a specific random augmentation occurring
 
 seqLen = 20 # Permissible sentence length
 vocDim = 10000 # Vocabulary size
@@ -167,8 +167,11 @@ for epoch in range(startEpoch, nEpochs):
     train(trainLoader, model, criterion, optimizer, epoch)
 
     if (epoch + 1) % 50 == 0:
-        save_checkpoint({'epoch': epoch + 1,
-                         'encArch': encArch,
+        save_checkpoint({'epoch': epoch,
+                         'params': {'encArch': encArch, 'nEpochs': nEpochs, 'batchSize': batchSize, 'initLR': initLR,
+                                    'momentum': momentum, 'weightDecay': weightDecay, 'fixPredLR': fixPredLR,
+                                    'randAugment': randAugment, 'augRNGThresh': augRNGThresh, 'seq': seqLen,
+                                    'voc': vocDim, 'emb': embDim, 'hid': hidDim, 'proj': projDim, 'pred': predDim},
                          'tokenizer': enTokenizer,
                          'vocabulary': allVocab,
                          'state_dict': model.state_dict(),

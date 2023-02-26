@@ -3,7 +3,7 @@ import numpy as np
 
 import simsiam.En_Es_Dataset
 import simsiam.NLPSS_Builder
-from encoding_checker_utils import *
+from Encoding_Checker_Utils import *
 
 import torch
 import torch.backends.cudnn as cudnn
@@ -16,20 +16,10 @@ import torch.backends.cudnn as cudnn
 dataPath = 'D:\SpaEngTranslation\spa.txt' # Path to dataset
 seed = None # Seed number for RNG
 batchSize = 256
-checkpointPath = 'checkpoints\checkpoint0499.pth.tar' # Path to resume from checkpoint - useless atm
-
-seqLen = 20 # Permissible sentence length
-vocDim = 10000 # Vocabulary size
-embDim = 256 # Word embedding dimension
-hidDim = 512 # RNN hidden dimension
-projDim = 512 # Projector output dimension
-predDim = 256 # Predictor internal dimension
+checkpointPath = 'checkpoints\checkpoint0999_5pctAug.pth.tar' # Path to resume from checkpoint - useless atm
 
 nSamples = None # Number of samples to downsample encodings - set as None to use all
 topk = 10
-
-enQuery = 'where is the bathroom?'
-esQuery = 'yo quiero helado.'
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if seed is not None:
@@ -42,7 +32,14 @@ if seed is not None:
 
 checkpoint = torch.load(checkpointPath, map_location='cpu')
 
-encArch = checkpoint['encArch']
+encArch = checkpoint['params']['encArch']
+seqLen = checkpoint['params']['seqLen']
+vocDim = checkpoint['params']['vocDim']
+embDim = checkpoint['params']['embDim']
+hidDim = checkpoint['params']['hidDim']
+projDim = checkpoint['params']['projDim']
+predDim = checkpoint['params']['predDim']
+randAugment = checkpoint['params']['randAugment']
 stateDict = checkpoint['state_dict']
 tokenizer = checkpoint['tokenizer']
 vocabulary = checkpoint['vocabulary']
@@ -72,7 +69,7 @@ allList.extend(esList)
 
 # Torch dataset/dataloader to gather samples, preprocess them, and load them as batches
 # I think this can be improved with native torchtext functions - I set it up like a custom image dataset to make batches
-trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, tokenizer, vocabulary, seqLen, transform=None)
+trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, tokenizer, vocabulary, seqLen, randAugment)
 trainLoader = torch.utils.data.DataLoader(trainDataset, batch_size=batchSize, shuffle=False, drop_last=False)
 
 model = simsiam.NLPSS_Builder.NLPSimSiam(encArch=encArch, vocDim=len(vocabulary), embDim=embDim,
@@ -88,7 +85,7 @@ model.eval()
 with torch.no_grad():
     for i, phrases in enumerate(trainLoader):
         if i % 100 == 0:
-            print(i)
+            print('{} lines processsed'.format(i * batchSize))
 
         tokArr = np.concatenate((tokArr, phrases[0].numpy()), axis=0)
         tokArr = np.concatenate((tokArr, phrases[1].numpy()), axis=0)
