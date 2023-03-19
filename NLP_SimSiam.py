@@ -1,6 +1,7 @@
 #from model_checker import *
 
 import math
+import random
 from collections import Counter
 
 import torch.nn as nn
@@ -17,26 +18,29 @@ import simsiam.NLPSS_Builder
 ###############
 
 # Dataset from http://storage.googleapis.com/download.tensorflow.org/data/spa-eng.zip
-dataPath = 'D:\SpaEngTranslation\spa.txt' # Path to dataset
-encArch = 'lstm' # Encoder architecture
+dataPath = r'C:\Users\jeremy\Python_Projects\NLP_simsiam\spa.txt' # Path to dataset
+encArch = 'bilstm' # Encoder architecture
 seed = None # Seed number for RNG
 nEpochs = 500
 startEpoch = 0
+nSubsets = 1 # Number of subsets do divide dataset into for single-pass training - if = 1, regular multipass training
 batchSize = 256
 initLR = 0.05 # Initial LR before decay
 momentum = 0.9
 weightDecay = 0.0001
 checkpointPath = None # Path to resume from checkpoint - useless atm
 fixPredLR = True # Fix the learning rate (no decay) of the predictor network
-randAugment = True # Boolean to do random augmentation on sentences
+charVocab = False # Use character level vocabulary, not word level
+noPunct = False # Strip punctuation from sentences
+randAugment = False # Boolean to do random augmentation on sentences
 augRNGThresh = 0.1 # Percent chance of a specific random augmentation occurring
 
 seqLen = 20 # Permissible sentence length
 vocDim = 10000 # Vocabulary size
-embDim = 256 # Word embedding dimension
-hidDim = 512 # RNN hidden dimension
-projDim = 512 # Projector output dimension
-predDim = 256 # Predictor internal dimension
+embDim = 128 # Word embedding dimension
+hidDim = 256 # Hidden dimension
+projDim = 256 # Projector output dimension
+predDim = 128 # Predictor internal dimension
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if seed is not None:
@@ -48,7 +52,7 @@ if seed is not None:
 #########################
 
 # From the text file, gather the corresponding lists of English/Spanish sentences
-def get_string_lists(filePath):
+def get_string_lists(filePath, noPunct=False):
     with open(filePath, 'r', encoding='utf-8') as f:
         allLines = f.readlines()
 
@@ -56,22 +60,30 @@ def get_string_lists(filePath):
     esList = []
     for line in allLines:
         lineVals = line.rstrip().lower().split('\t')
+        if noPunct:
+            lineVals[0] = ''.join(char for char in lineVals[0] if char.isalnum() or char == ' ')
+            lineVals[1] = ''.join(char for char in lineVals[1] if char.isalnum() or char == ' ')
         enList.append(lineVals[0])
         esList.append(lineVals[1])
 
     return enList, esList
 
 # Get the string lists and then make one large list of both English and Spanish
-enList, esList = get_string_lists(dataPath)
+enList, esList = get_string_lists(dataPath, noPunct)
 allList = enList.copy()
 allList.extend(esList)
 
 # Create the sentence tokenizer (I just used the English one, it works well enough for tokenizing spanish too)
-enTokenizer = get_tokenizer('spacy', language='en_core_web_sm')
-#esTokenizer = get_tokenizer('spacy', language='es_core_news_sm')
+if charVocab:
+    def charTokenizer(string):
+        return [char for char in string]
+    tokenizer = charTokenizer
+else:
+    tokenizer = get_tokenizer('spacy', language='en_core_web_sm')
+    #esTokenizer = get_tokenizer('spacy', language='es_core_news_sm')
 
 # Count the number of unique tokens in the corpus, keep the most popular ones, then create a token dict
-# Also add the <unk> and <pad> tokens to the dictonary
+# Also add the <unk> and <pad> tokens to the dictionary
 def build_vocab(stringList, tokenizer, maxSize):
     counter = Counter()
     for stringVal in stringList:
@@ -81,13 +93,8 @@ def build_vocab(stringList, tokenizer, maxSize):
 # Get the token dictionary and set the default token as the <unk> token
 #enVocab = build_vocab(enList, enTokenizer, maxSize=10000)
 #esVocab = build_vocab(esList, esTokenizer, maxSize=10000)
-allVocab = build_vocab(allList, enTokenizer, maxSize=vocDim)
+allVocab = build_vocab(allList, tokenizer, maxSize=vocDim)
 allVocab.set_default_index(allVocab['<unk>'])
-
-# Torch dataset/dataloader to gather samples, preprocess them, and load them as batches
-# I think this can be improved with native torchtext functions - I set it up like a custom image dataset to make batches
-trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, enTokenizer, allVocab, seqLen, randAugment, augRNGThresh)
-trainLoader = torch.utils.data.DataLoader(trainDataset, batch_size=batchSize, shuffle=True, drop_last=False)
 
 ###############
 # Build Model #
@@ -102,7 +109,7 @@ model = model.to(device)
 criterion = nn.CosineSimilarity(dim=1)
 criterion = criterion.to(device)
 
-# Adjust the intial learning rate based on batch size
+# Adjust the initial learning rate based on batch size
 initLR = initLR * batchSize / 256
 
 # Fix the learning rate of the predictor
@@ -143,10 +150,7 @@ def train(trainLoader, model, criterion, optimizer, epoch):
         loss.backward()
         optimizer.step()
 
-        # Print status
-        if ii == (len(trainLoader) - 1):
-            print('Epoch {:04d} | Batch {:04d} / {:04d} | 1 Batch Loss: {:6.3f} | Epoch Avg Loss: {:6.3f}'
-                  .format(epoch, ii, len(trainLoader) - 1, loss.detach(), lossAvg))
+    return loss.detach(), lossAvg
 
 # Decay the learning rate based on schedule
 def adjust_learning_rate(optimizer, initLR, epoch):
@@ -161,18 +165,58 @@ def adjust_learning_rate(optimizer, initLR, epoch):
 def save_checkpoint(state, fileName='checkpoint.pth.tar'):
     torch.save(state, fileName)
 
+# Torch dataset/dataloader to gather samples, preprocess them, and load them as batches
+# I think this can be improved with native torchtext functions - I set it up like a custom image dataset to make batches
+trainDataset = simsiam.En_Es_Dataset.En_Es_Dataset(enList, esList, tokenizer, allVocab,
+                                                   seqLen, randAugment, augRNGThresh)
+trainLoader = torch.utils.data.DataLoader(trainDataset, batch_size=batchSize, shuffle=True, drop_last=False)
+
+# Sets up subsets for single-pass training on training data subsets
+# Generate a list of randomized indices of the length of the dataset and denote which ones correspond to each subset
+if nSubsets > 1:
+    randIdxList = list(range(len(trainDataset)))
+    random.shuffle(randIdxList)
+    subsetSize = math.floor(len(randIdxList) / nSubsets)
+    subsetIdx = {}
+    for i in range(nSubsets):
+        if i == nSubsets - 1:
+            subsetIdx[i] = [i * subsetSize, len(randIdxList)]
+        else:
+            subsetIdx[i] = [i * subsetSize, (i + 1) * subsetSize]
+
 # Do the actual training
 for epoch in range(startEpoch, nEpochs):
     adjust_learning_rate(optimizer, initLR, epoch)
-    train(trainLoader, model, criterion, optimizer, epoch)
 
-    if (epoch + 1) % 50 == 0:
+    # If doing single-pass training and ready for a new training subset, then create the new subset and dataloader
+    # Only updates subset/dataloader every nEpochs/nSubsets epochs
+    if nSubsets > 1 and epoch % (nEpochs / nSubsets) == 0:
+        subsetNum = math.floor(epoch / (nEpochs / nSubsets))
+        trainSubset = torch.utils.data.Subset(trainDataset,
+                                              randIdxList[subsetIdx[subsetNum][0]:subsetIdx[subsetNum][1]])
+        trainLoader = torch.utils.data.DataLoader(trainSubset, batch_size=batchSize, shuffle=True, drop_last=False)
+
+    # Train the model using the current trainloader
+    # If using multiple smaller subsets, train nSubsets times on the 1/nSubsets sized dataset
+    for _ in range(nSubsets):
+        loss, lossAvg = train(trainLoader, model, criterion, optimizer, epoch)
+
+    # Print status
+    outString = 'Epoch {:04d} | 1 Batch Loss: {:6.3f} | Epoch Avg Loss: {:6.3f}'.format(epoch, loss.detach(), lossAvg)
+    print(outString)
+    with open('checkpoints\out.txt', 'a') as f:
+        f.write(outString + '\n')
+
+    # Save checkpoint
+    if (epoch + 1) % 100 == 0:
         save_checkpoint({'epoch': epoch,
-                         'params': {'encArch': encArch, 'nEpochs': nEpochs, 'batchSize': batchSize, 'initLR': initLR,
-                                    'momentum': momentum, 'weightDecay': weightDecay, 'fixPredLR': fixPredLR,
-                                    'randAugment': randAugment, 'augRNGThresh': augRNGThresh, 'seq': seqLen,
-                                    'voc': vocDim, 'emb': embDim, 'hid': hidDim, 'proj': projDim, 'pred': predDim},
-                         'tokenizer': enTokenizer,
+                         'params': {'encArch': encArch, 'nEpochs': nEpochs, 'nSubsets': nSubsets,
+                                    'batchSize': batchSize, 'initLR': initLR, 'momentum': momentum,
+                                    'weightDecay': weightDecay, 'fixPredLR': fixPredLR, 'noPunct': noPunct,
+                                    'randAugment': randAugment, 'augRNGThresh': augRNGThresh, 'seqLen': seqLen,
+                                    'vocDim': vocDim, 'embDim': embDim, 'hidDim': hidDim, 'projDim': projDim,
+                                    'predDim': predDim},
+                         'tokenizer': tokenizer,
                          'vocabulary': allVocab,
                          'state_dict': model.state_dict(),
                          'optimizer': optimizer.state_dict()},
