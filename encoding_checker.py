@@ -16,7 +16,7 @@ import torch.backends.cudnn as cudnn
 dataPath = r'C:\Users\jeremy\Python_Projects\NLP_simsiam\spa.txt' # Path to dataset
 seed = None # Seed number for RNG
 batchSize = 256
-checkpointPath = 'checkpoints\checkpoint0499_CNN_0pctAug_Punct_WordToken.pth.tar' # Path to resume from checkpoint - useless atm
+checkpointPath = 'checkpoints\checkpoint0499_LSTM_5pctAug_Punct_WordToken_0p25LR.pth.tar' # Path to resume from checkpoint - useless atm
 
 nSamples = 20000 # Number of samples to downsample testing samples - set as None to use all
 
@@ -212,15 +212,12 @@ topk = 5
 print_topk_strings(1000, None, encArr, topk)
 print_topk_strings(1000, enList, encArr, topk)
 print_topk_strings(1000, esList, encArr, topk)
-print_topk_strings(2000, None, encArr, topk)
-print_topk_strings(2000, enList, encArr, topk)
-print_topk_strings(2000, esList, encArr, topk)
+print_topk_strings(2200, None, encArr, topk)
+print_topk_strings(2200, enList, encArr, topk)
+print_topk_strings(2200, esList, encArr, topk)
 print_topk_strings(10000, None, encArr, topk)
 print_topk_strings(10000, enList, encArr, topk)
 print_topk_strings(10000, esList, encArr, topk)
-print_topk_strings(19000, None, encArr, topk)
-print_topk_strings(19000, enList, encArr, topk)
-print_topk_strings(19000, esList, encArr, topk)
 
 topn = 10
 topNAcc = get_top_n_acc(encArr, 500, topn)

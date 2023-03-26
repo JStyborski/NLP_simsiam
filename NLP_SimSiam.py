@@ -19,21 +19,21 @@ import simsiam.NLPSS_Builder
 
 # Dataset from http://storage.googleapis.com/download.tensorflow.org/data/spa-eng.zip
 dataPath = r'C:\Users\jeremy\Python_Projects\NLP_simsiam\spa.txt' # Path to dataset
-encArch = 'bilstm' # Encoder architecture
+encArch = 'lstm' # Encoder architecture
 seed = None # Seed number for RNG
 nEpochs = 500
 startEpoch = 0
 nSubsets = 1 # Number of subsets do divide dataset into for single-pass training - if = 1, regular multipass training
 batchSize = 256
-initLR = 0.05 # Initial LR before decay
+initLR = 0.25 # Initial LR before decay
 momentum = 0.9
 weightDecay = 0.0001
 checkpointPath = None # Path to resume from checkpoint - useless atm
 fixPredLR = True # Fix the learning rate (no decay) of the predictor network
 charVocab = False # Use character level vocabulary, not word level
 noPunct = False # Strip punctuation from sentences
-randAugment = False # Boolean to do random augmentation on sentences
-augRNGThresh = 0.1 # Percent chance of a specific random augmentation occurring
+randAugment = True # Boolean to do random augmentation on sentences
+augRNGThresh = 0.05 # Percent chance of a specific random augmentation occurring
 
 seqLen = 20 # Permissible sentence length
 vocDim = 10000 # Vocabulary size
