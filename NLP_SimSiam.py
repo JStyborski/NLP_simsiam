@@ -129,7 +129,7 @@ optimizer = torch.optim.SGD(optimParams, initLR, momentum=momentum, weight_decay
 ###############
 
 # Function to carry out 1 epoch of training
-def train(trainLoader, model, criterion, optimizer, epoch):
+def train(trainLoader, model, criterion, optimizer):
 
     model.train()
     lossAvg = 0

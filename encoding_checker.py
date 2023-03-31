@@ -16,9 +16,9 @@ import torch.backends.cudnn as cudnn
 dataPath = r'C:\Users\jeremy\Python_Projects\NLP_simsiam\spa.txt' # Path to dataset
 seed = None # Seed number for RNG
 batchSize = 256
-checkpointPath = 'checkpoints\checkpoint0499_LSTM_5pctAug_Punct_WordToken_0p25LR.pth.tar' # Path to resume from checkpoint - useless atm
+checkpointPath = 'checkpoints\checkpoint0499_BiLSTM_0pctAug_Punct_WordToken_0p25LR.pth.tar' # Path to resume from checkpoint - useless atm
 
-nSamples = 20000 # Number of samples to downsample testing samples - set as None to use all
+nSamples = 100000 # Number of samples to downsample testing samples - set as None to use all
 
 device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 if seed is not None:
@@ -146,21 +146,40 @@ encArr = encArr[:, 1:]
 #####################
 
 # Get the encArr idxs sorted by closest to the encoding at idx
-def get_closest_enc_idxs(encArr, idx):
-    cosSimList = cos_sim_to_one_vec(encArr, encArr[:, idx])
+def get_closest_enc_idxs(encArr, encVec):
+    print(encVec.shape)
+    cosSimList = cos_sim_to_one_vec(encArr, encVec)
     sortIdxs = np.argsort(cosSimList)[::-1]
     return sortIdxs
 
 # Using encArr indices sorted by closest, get the topk of them
 def get_closest_vecs(idx, encArr, topk):
-    sortIdxs = get_closest_enc_idxs(encArr, idx)
+    sortIdxs = get_closest_enc_idxs(encArr, encArr[:, idx])
     topkIdxs = sortIdxs[0:topk]
 
     return topkIdxs
 
 # Using encArr indices sorted by closest, get the topk of them that are in the opposite language
 def get_closest_one_lang_vecs(idx, oppList, encArr, topk):
-    sortIdxs = get_closest_enc_idxs(encArr, idx)
+    sortIdxs = get_closest_enc_idxs(encArr, encArr[:, idx])
+
+    topkIdxs = []
+    for sortIdx in sortIdxs:
+        if stringList[sortIdx] in oppList:
+            topkIdxs.append(sortIdx)
+        if len(topkIdxs) >= topk:
+            break
+
+    return topkIdxs
+
+def get_closest_vecs_user_input(inpEnc, encArr, topk):
+    sortIdxs = get_closest_enc_idxs(encArr, inpEnc)
+    topkIdxs = sortIdxs[0:topk]
+
+    return topkIdxs
+
+def get_closest_one_lang_vecs_user_input(inpEnc, oppList, encArr, topk):
+    sortIdxs = get_closest_enc_idxs(encArr, inpEnc)
 
     topkIdxs = []
     for sortIdx in sortIdxs:
@@ -208,17 +227,38 @@ def get_top_n_acc(encArr, nQueries, topk):
 
     return inTopkCount / nQueries
 
-topk = 5
-print_topk_strings(1000, None, encArr, topk)
-print_topk_strings(1000, enList, encArr, topk)
-print_topk_strings(1000, esList, encArr, topk)
-print_topk_strings(2200, None, encArr, topk)
-print_topk_strings(2200, enList, encArr, topk)
-print_topk_strings(2200, esList, encArr, topk)
-print_topk_strings(10000, None, encArr, topk)
-print_topk_strings(10000, enList, encArr, topk)
-print_topk_strings(10000, esList, encArr, topk)
+topk = 10
+#print_topk_strings(1000, None, encArr, topk)
+#print_topk_strings(1000, enList, encArr, topk)
+#print_topk_strings(1000, esList, encArr, topk)
+#print_topk_strings(2200, None, encArr, topk)
+#print_topk_strings(2200, enList, encArr, topk)
+#print_topk_strings(2200, esList, encArr, topk)
+#print_topk_strings(10000, None, encArr, topk)
+#print_topk_strings(10000, enList, encArr, topk)
+#print_topk_strings(10000, esList, encArr, topk)
 
 topn = 10
-topNAcc = get_top_n_acc(encArr, 500, topn)
-print('\nTop-{} Acc: {}'.format(topn, topNAcc))
+#topNAcc = get_top_n_acc(encArr, 500, topn)
+#print('\nTop-{} Acc: {}'.format(topn, topNAcc))
+
+# Input sentence
+inpStr = 'me puedes dar tea and sugar?'
+inpTok = tokenizer(inpStr)
+inpIdx = vocabulary(inpTok)
+if len(inpIdx) < seqLen:
+    inpIdx = [vocabulary['<pad>']] * (seqLen - len(inpIdx)) + inpIdx
+else:
+    inpIdx = inpIdx[:seqLen]
+with torch.no_grad():
+    inpEmb = model.embedder(torch.tensor(inpIdx).to(device))
+    inpOut, inpHid = model.encoder(inpEmb)
+    inpHid = torch.concat([inpHid[0][0, :], inpHid[0][1, :]], dim=0).squeeze().cpu().numpy()
+topkIdxs = get_closest_vecs_user_input(inpHid, encArr, topk)
+#topkIdxs = get_closest_one_lang_vecs_user_input(inpHid, esList, encArr, topk)
+print('\nQuery: {}'.format(inpStr))
+print('Closest sentences:')
+topkStrings = [stringList[idx] for idx in topkIdxs]
+for stringItem in topkStrings:
+    print(stringItem)
+
